@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parts Library</title>
+  <meta name="description" content="Preview, measure and download 3D CAD files.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 28 10v12L16 29 4 22V10z' fill='%23f0b400' stroke='%231d262b' stroke-width='2.5' stroke-linejoin='round'/%3E%3Cpath d='M4 10l12 7 12-7M16 17v12' fill='none' stroke='%231d262b' stroke-width='2.5'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+      "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.3/esm/browser.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead">
+    <a class="brand" href="#/" id="brand">Parts Library</a>
+  </header>
+
+  <main id="main">
+    <!-- Home: every part in the library -->
+    <section id="gallery" class="gallery" hidden>
+      <div class="gallery-head">
+        <div>
+          <h1 id="site-title">Parts Library</h1>
+          <p id="site-intro" class="intro"></p>
+        </div>
+        <div class="finder">
+          <label for="search" class="visually-hidden">Search parts</label>
+          <input id="search" type="search" placeholder="Search parts" autocomplete="off">
+          <p id="count" class="count" aria-live="polite"></p>
+        </div>
+      </div>
+      <ul id="cards" class="cards"></ul>
+      <div id="gallery-empty" class="notice" hidden></div>
+    </section>
+
+    <!-- One part: viewer + details -->
+    <section id="detail" class="detail" hidden>
+      <div class="stage-wrap">
+        <div id="stage" class="stage" aria-label="3D preview. Drag to rotate, scroll or pinch to zoom, right-drag or two-finger drag to pan."></div>
+
+        <div id="stage-status" class="stage-status" hidden>
+          <p id="status-text"></p>
+          <div class="meter" id="status-meter" hidden><span id="status-bar"></span></div>
+          <button id="status-action" class="btn" type="button" hidden></button>
+        </div>
+
+        <div id="measure-hint" class="measure-hint" hidden></div>
+
+        <div class="toolbar" role="toolbar" aria-label="Viewer tools">
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" data-view="iso" title="Isometric view">Iso</button>
+            <button type="button" data-view="front" title="Front view">Front</button>
+            <button type="button" data-view="top" title="Top view">Top</button>
+            <button type="button" data-view="right" title="Right view">Right</button>
+          </div>
+          <button type="button" id="tool-edges" aria-pressed="true" title="Show feature edges">Edges</button>
+          <button type="button" id="tool-measure" aria-pressed="false" title="Click two points to measure (M)">Measure</button>
+          <button type="button" id="tool-image" title="Download a PNG of the current view">Save image</button>
+        </div>
+      </div>
+
+      <aside class="sheet">
+        <a href="#/" class="back">All parts</a>
+        <h1 id="part-title" tabindex="-1"></h1>
+        <p id="part-desc" class="part-desc"></p>
+        <ul id="part-tags" class="tags"></ul>
+
+        <div class="envelope" id="envelope" hidden>
+          <div class="envelope-head">
+            <h2>Overall size</h2>
+            <div class="units seg" role="group" aria-label="Units">
+              <button type="button" data-units="mm" aria-pressed="true">mm</button>
+              <button type="button" data-units="in" aria-pressed="false">in</button>
+            </div>
+          </div>
+          <dl class="dims">
+            <div><dt>X</dt><dd id="dim-x"></dd></div>
+            <div><dt>Y</dt><dd id="dim-y"></dd></div>
+            <div><dt>Z</dt><dd id="dim-z"></dd></div>
+          </dl>
+        </div>
+
+        <div id="preview-pick" class="block" hidden>
+          <h2>Preview</h2>
+          <div class="seg seg-wide" id="preview-buttons" role="group" aria-label="Preview file"></div>
+        </div>
+
+        <div class="block">
+          <h2>Download</h2>
+          <ul id="downloads" class="downloads"></ul>
+          <button type="button" id="download-all" class="btn btn-quiet" hidden>Download all as .zip</button>
+        </div>
+
+        <div class="block" id="measure-block" hidden>
+          <div class="block-head">
+            <h2>Measurements</h2>
+            <button type="button" id="measure-clear" class="link-btn">Clear</button>
+          </div>
+          <ol id="measure-list" class="measure-list"></ol>
+        </div>
+
+        <button type="button" id="copy-link" class="link-btn copy">Copy link to this part</button>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="foot" id="foot"></footer>
+
+  <script type="module" src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+node_modules/
+.thumb-cache/
+_site/
+# Built automatically on GitHub; no need to commit
+models.json
+thumbs/
+.DS_Store
+Thumbs.db
