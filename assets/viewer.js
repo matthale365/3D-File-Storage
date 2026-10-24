@@ -101,6 +101,8 @@ export class Viewer {
     part.traverse((o) => { if (o.isMesh) this.meshes.push(o); });
 
     // Size in the file's own axes (before turning it Y-up for display).
+    part.position.set(0, 0, 0); // the same group can be shown again (plates)
+    part.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(part);
     this.size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -115,7 +117,7 @@ export class Viewer {
     if (tris < 1_500_000) {
       const edgeMat = new THREE.LineBasicMaterial({ color: this.ink, transparent: true, opacity: 0.55 });
       for (const m of this.meshes) {
-        const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 28), edgeMat);
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.userData.edgeGeometry || m.geometry, 28), edgeMat);
         e.matrixAutoUpdate = false;
         e.matrix.copy(m.matrixWorld);
         this.edges.add(e);

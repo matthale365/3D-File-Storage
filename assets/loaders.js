@@ -209,27 +209,54 @@ export function parse3MF(buffer) {
     return info;
   }
 
-  // Bambu / Orca: filament colours + which filament each object uses.
+  // Bambu / Orca: filament colours, plus which filament each object and each
+  // part inside it uses (model_settings.config). Part ids match the objectid
+  // of the component that points at that part's mesh.
   const filamentColors = [];
-  const objectExtruder = new Map();
+  const objectExtruder = new Map(); // object id -> filament number
+  const partExtruder = new Map(); // "objectId/partId" -> filament number
+  const plates = []; // [{ number, name, ids:Set<objectId> }]
   try {
     const ps = read('Metadata/project_settings.config');
     if (ps) for (const c of JSON.parse(strFromU8(ps)).filament_colour || []) filamentColors.push(hexFromDisplayColor(c));
   } catch { /* not a Bambu project, or unreadable — fall back to defaults */ }
+  const extruderOf = (el) => {
+    const m = children(el, 'metadata').find((x) => x.getAttribute('key') === 'extruder');
+    const n = m ? Number(m.getAttribute('value')) : 0;
+    return n > 0 ? n : 0; // 0 = "same as the object"
+  };
   try {
     const ms = read('Metadata/model_settings.config');
     if (ms) {
-      for (const obj of parseXml(strFromU8(ms)).getElementsByTagName('object')) {
-        const ex = Array.from(obj.getElementsByTagName('metadata')).find((m) => m.getAttribute('key') === 'extruder');
-        if (ex) objectExtruder.set(obj.getAttribute('id'), Number(ex.getAttribute('value')));
+      const msDoc = parseXml(strFromU8(ms));
+      for (const obj of children(msDoc.documentElement, 'object')) {
+        const oid = obj.getAttribute('id');
+        const ex = extruderOf(obj);
+        if (ex) objectExtruder.set(oid, ex);
+        for (const part of children(obj, 'part')) {
+          const pex = extruderOf(part);
+          if (pex) partExtruder.set(oid + '/' + part.getAttribute('id'), pex);
+        }
       }
+      // Plates: which objects sit on which build plate.
+      for (const plate of children(msDoc.documentElement, 'plate')) {
+        const meta = (k) => children(plate, 'metadata').find((x) => x.getAttribute('key') === k)?.getAttribute('value');
+        const ids = new Set();
+        for (const inst of children(plate, 'model_instance')) {
+          const id = children(inst, 'metadata').find((x) => x.getAttribute('key') === 'object_id')?.getAttribute('value');
+          if (id) ids.add(id);
+        }
+        const n = Number(meta('plater_id')) || plates.length + 1;
+        plates.push({ number: n, name: meta('plater_name') || '', ids });
+      }
+      plates.sort((a, b) => a.number - b.number);
     }
   } catch { /* ignore */ }
+  const filament = (n) => (n > 0 && filamentColors[n - 1]) || null;
 
-  const geomCache = new Map();
-  function meshGeometry(info, id, objEl) {
-    const key = info.path + '#' + id;
-    if (geomCache.has(key)) return geomCache.get(key);
+  // Builds a mesh, splitting it by colour. `baseColor` is the part's own
+  // filament; triangles painted in the slicer (paint_color) override it.
+  function buildMesh(info, objEl, baseColor) {
     const meshEl = first(objEl, 'mesh');
     const vertsEl = first(meshEl, 'vertices');
     const trisEl = first(meshEl, 'triangles');
@@ -242,38 +269,67 @@ export function parse3MF(buffer) {
       pos[i * 3 + 1] = +v.getAttribute('y');
       pos[i * 3 + 2] = +v.getAttribute('z');
     }
-    const idx = new Uint32Array(tEls.length * 3);
-    for (let i = 0; i < tEls.length; i++) {
-      const t = tEls[i];
-      idx[i * 3] = +t.getAttribute('v1');
-      idx[i * 3 + 1] = +t.getAttribute('v2');
-      idx[i * 3 + 2] = +t.getAttribute('v3');
+
+    const buckets = new Map(); // hex -> number[] (flat xyz triangles)
+    const bucket = (hex) => {
+      if (!buckets.has(hex)) buckets.set(hex, []);
+      return buckets.get(hex);
+    };
+    const colorForState = (state) => (state > 0 && filament(state)) || baseColor;
+    const original = new Float32Array(tEls.length * 9); // unpainted copy, for edge lines
+    const vert = (i) => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
+
+    for (let t = 0; t < tEls.length; t++) {
+      const el = tEls[t];
+      const a = vert(+el.getAttribute('v1'));
+      const b = vert(+el.getAttribute('v2'));
+      const c = vert(+el.getAttribute('v3'));
+      original.set(a, t * 9); original.set(b, t * 9 + 3); original.set(c, t * 9 + 6);
+      const paint = el.getAttribute('paint_color') || el.getAttribute('slic3rpe:mmu_segmentation');
+      if (!paint) {
+        bucket(baseColor).push(...a, ...b, ...c);
+        continue;
+      }
+      decodePaint(paint, a, b, c, (p, q, r, state) => bucket(colorForState(state)).push(...p, ...q, ...r));
     }
-    // Flat-ish shading reads better on printed parts than smoothed normals.
-    let geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setIndex(new THREE.BufferAttribute(idx, 1));
-    geom = geom.toNonIndexed();
-    geom.computeVertexNormals();
-    geomCache.set(key, geom);
-    return geom;
+
+    const geom = new THREE.BufferGeometry();
+    const total = [...buckets.values()].reduce((n, arr) => n + arr.length, 0);
+    const all = new Float32Array(total);
+    const mats = [];
+    let offset = 0;
+    for (const [hex, arr] of buckets) {
+      all.set(arr, offset);
+      geom.addGroup(offset / 3, arr.length / 3, mats.length);
+      mats.push(partMaterial(hex));
+      offset += arr.length;
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(all, 3));
+    geom.computeVertexNormals(); // non-indexed, so this gives crisp flat faces
+
+    const mesh = new THREE.Mesh(geom, mats.length === 1 ? mats[0] : mats);
+    const edgeSource = new THREE.BufferGeometry();
+    edgeSource.setAttribute('position', new THREE.BufferAttribute(original, 3));
+    mesh.userData.edgeGeometry = edgeSource; // painted sub-triangles would add stray lines
+    return mesh;
   }
 
-  const group = new THREE.Group();
+  let group = new THREE.Group(); // where addObject puts meshes
   const scaleMatrix = (s) => new THREE.Matrix4().makeScale(s, s, s);
 
-  function addObject(info, id, matrix, color, depth) {
+  // `topId` is the build item's object id, used to look up per-part filaments.
+  function addObject(info, id, matrix, color, depth, topId) {
     if (depth > 16) return;
     const objEl = info.objects.get(id);
     if (!objEl) return;
-    // Object-level colour from a standard 3MF material/colour group.
+    // Standard 3MF colour (material / colour group) on the object.
     const pid = objEl.getAttribute('pid');
     if (pid && info.colors.has(pid)) {
       const c = info.colors.get(pid)[Number(objEl.getAttribute('pindex') || 0)];
       if (c) color = c;
     }
     if (first(objEl, 'mesh')) {
-      const mesh = new THREE.Mesh(meshGeometry(info, id, objEl), partMaterial(color));
+      const mesh = buildMesh(info, objEl, color);
       mesh.applyMatrix4(new THREE.Matrix4().multiplyMatrices(matrix, scaleMatrix(info.unit)));
       mesh.name = objEl.getAttribute('name') || '';
       group.add(mesh);
@@ -283,8 +339,10 @@ export function parse3MF(buffer) {
       for (const c of children(comps, 'component')) {
         const path = c.getAttributeNS(PROD_NS, 'path') || c.getAttribute('p:path');
         const target = path ? model(path) : info;
+        const childId = c.getAttribute('objectid');
+        const childColor = filament(partExtruder.get(topId + '/' + childId)) || color;
         const childMatrix = new THREE.Matrix4().multiplyMatrices(matrix, matrixFrom3mf(c.getAttribute('transform')));
-        addObject(target, c.getAttribute('objectid'), childMatrix, color, depth + 1);
+        addObject(target, childId, childMatrix, childColor, depth + 1, topId);
       }
     }
   }
@@ -292,18 +350,76 @@ export function parse3MF(buffer) {
   const root = model(rootPath);
   const build = first(root.root, 'build');
   const items = build ? children(build, 'item') : [];
-  items.forEach((item, i) => {
+  const all = group;
+  const plateGroups = new Map(); // plate number -> THREE.Group
+  const plateOf = (id) => plates.find((p) => p.ids.has(id))?.number ?? plates[0]?.number ?? 1;
+  for (const item of items) {
+    if (item.getAttribute('printable') === '0') continue;
     const id = item.getAttribute('objectid');
-    const extruder = objectExtruder.get(id);
-    const color = (extruder && filamentColors[extruder - 1]) || DEFAULT_COLOR;
+    const pn = plateOf(id);
+    if (!plateGroups.has(pn)) plateGroups.set(pn, new THREE.Group());
+    group = plateGroups.get(pn);
+    const color = filament(objectExtruder.get(id)) || DEFAULT_COLOR;
     const path = item.getAttributeNS(PROD_NS, 'path') || item.getAttribute('p:path');
-    addObject(path ? model(path) : root, id, matrixFrom3mf(item.getAttribute('transform')), color, 0);
-  });
+    addObject(path ? model(path) : root, id, matrixFrom3mf(item.getAttribute('transform')), color, 0, id);
+  }
 
-  if (!group.children.length) {
+  group = all;
+  const used = [...plateGroups.entries()].filter(([, g]) => g.children.length).sort((a, b) => a[0] - b[0]);
+  for (const [, g] of used) group.add(g);
+  if (used.length > 1) {
+    // Several plates: the page shows one at a time, like the slicer.
+    group.userData.plates = used.map(([n, g]) => {
+      const name = plates.find((p) => p.number === n)?.name;
+      return { label: `Plate ${n}`, title: name || `Plate ${n}`, group: g };
+    });
+  }
+
+  if (!group.children.length || !used.length) {
     throw new Error(read('Metadata/plate_1.gcode')
       ? 'This is a sliced print file (G-code only) — it has no model to preview. It can still be downloaded.'
       : 'This 3MF opened but contains no model geometry.');
   }
   return group;
+}
+
+// ---------- Slicer paint (multi-colour painting) ----------
+// PrusaSlicer / Bambu Studio / Orca store painted colour per triangle as a hex
+// string encoding a subdivision tree (TriangleSelector serialisation). Read
+// from the end of the string, each hex digit is one 4-bit code:
+//   low 2 bits = number of split sides (0 = leaf)
+//   leaf:  high 2 bits = colour state; 3 means "read one more digit, add 3"
+//   split: high 2 bits = which corner the split starts from
+// Children are stored last-to-first. State 0 = the part's own filament,
+// state n = filament n.
+function decodePaint(str, a, b, c, emit) {
+  let pos = str.length - 1;
+  const next = () => (pos >= 0 ? parseInt(str[pos--], 16) || 0 : 0);
+  const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2];
+  const visit = (v0, v1, v2, depth) => {
+    const code = next();
+    const sides = code & 3;
+    if (sides === 0 || depth > 12) {
+      let state = code >> 2;
+      if (state === 3) state = next() + 3;
+      emit(v0, v1, v2, state);
+      return;
+    }
+    const v = [v0, v1, v2];
+    const s = code >> 2;
+    const p = v[s % 3], q = v[(s + 1) % 3], r = v[(s + 2) % 3];
+    let kids;
+    if (sides === 1) {
+      const m = mid(q, r);
+      kids = [[p, q, m], [m, r, p]];
+    } else if (sides === 2) {
+      const m1 = mid(p, q), m2 = mid(p, r);
+      kids = [[p, m1, m2], [m1, q, m2], [q, r, m2]];
+    } else {
+      const m1 = mid(p, q), m2 = mid(q, r), m3 = mid(p, r);
+      kids = [[p, m1, m3], [m1, q, m2], [m2, r, m3], [m1, m2, m3]];
+    }
+    for (let k = kids.length - 1; k >= 0; k--) visit(kids[k][0], kids[k][1], kids[k][2], depth + 1);
+  };
+  visit(a, b, c, 0);
 }

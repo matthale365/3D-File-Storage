@@ -27,7 +27,7 @@ const RENDER_VERSION = 'r1'; // bump to re-render every thumbnail
 const WANT_RENDER = process.argv.includes('--thumbnails');
 
 const KINDS = { step: 'step', stp: 'step', iges: 'iges', igs: 'iges', '3mf': '3mf', stl: 'stl' };
-const PREVIEW_ORDER = ['step', 'iges', '3mf', 'stl'];
+const PREVIEW_ORDER = ['3mf', 'step', 'iges', 'stl']; // 3MF first: it carries the print colours
 const THUMB_NAMES = ['thumbnail.png', 'thumbnail.jpg', 'thumbnail.jpeg', 'thumbnail.webp'];
 const SKIP = new Set(['info.json', ...THUMB_NAMES]);
 

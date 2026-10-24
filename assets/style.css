@@ -156,12 +156,12 @@ code { font-size: 0.92em; background: var(--surface); border: 1px solid var(--ru
 .dims { margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .dims div { min-width: 0; }
 .dims dt { font-size: 0.8rem; font-weight: 700; color: var(--caliper); }
-.dims dd { margin: 0; font-size: clamp(1.3rem, 2.2vw, 1.75rem); line-height: 1.1; font-weight: 720; font-variation-settings: 'wdth' 118; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dims dd { margin: 0; font-size: clamp(1.15rem, 1.8vw, 1.6rem); line-height: 1.1; font-weight: 720; font-variation-settings: 'wdth' 100; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .block { margin-top: 26px; }
 .block-head { display: flex; justify-content: space-between; align-items: baseline; }
 .seg-wide { display: flex; }
-.seg-wide button { flex: 1; }
+.seg-wide button { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .downloads { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .dl {

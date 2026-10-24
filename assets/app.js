@@ -5,7 +5,7 @@ import { loadModel, fileKind, fetchBytes } from './loaders.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const url = (path) => path.split('/').map(encodeURIComponent).join('/');
-const PREVIEW_ORDER = ['step', 'iges', '3mf', 'stl'];
+const PREVIEW_ORDER = ['3mf', 'step', 'iges', 'stl']; // 3MF first: it carries the print colours
 const KIND_LABEL = { step: 'STEP', iges: 'IGES', '3mf': '3MF', stl: 'STL' };
 
 function bytes(n) {
@@ -130,6 +130,7 @@ async function preview(model, file, { force = false } = {}) {
   const token = ++loadToken;
   current = { model, file };
   v.clear();
+  $('plate-pick').hidden = true;
   renderDims();
   for (const b of $('preview-buttons').children) b.setAttribute('aria-pressed', String(b.dataset.path === file.path));
 
@@ -146,7 +147,17 @@ async function preview(model, file, { force = false } = {}) {
       else status({ text: file.kind === 'step' || file.kind === 'iges' ? 'Converting CAD geometry' : 'Building preview' });
     });
     if (token !== loadToken) return;
-    v.setModel(part);
+    const plates = part.userData.plates || [];
+    $('plate-pick').hidden = plates.length < 2;
+    $('plate-buttons').innerHTML = plates.map((p, i) => `<button type="button" data-plate="${i}" aria-pressed="${i === 0}" title="${esc(p.title)}">${esc(p.label)}</button>`).join('');
+    $('plate-buttons').onclick = (e) => {
+      const b = e.target.closest('[data-plate]');
+      if (!b || token !== loadToken) return;
+      for (const x of $('plate-buttons').children) x.setAttribute('aria-pressed', String(x === b));
+      v.setModel(plates[Number(b.dataset.plate)].group);
+      renderDims();
+    };
+    v.setModel(plates.length > 1 ? plates[0].group : part);
     status();
     renderDims();
     window.__thumb = 'ready';
@@ -188,7 +199,12 @@ async function showPart(id, { thumbMode = false } = {}) {
     .sort((a, b) => PREVIEW_ORDER.indexOf(a.kind) - PREVIEW_ORDER.indexOf(b.kind));
   const preferred = previewable.find((f) => f.name === model.preview) || previewable[0];
   $('preview-pick').hidden = previewable.length < 2;
-  $('preview-buttons').innerHTML = previewable.map((f) => `<button type="button" data-path="${esc(f.path)}">${esc(KIND_LABEL[f.kind])}</button>`).join('');
+  // Two files of the same type (e.g. two 3MFs)? Label them by file name.
+  const dupKind = (k) => previewable.filter((f) => f.kind === k).length > 1;
+  $('preview-buttons').innerHTML = previewable.map((f) => {
+    const label = dupKind(f.kind) ? f.name.replace(/\.[^.]+$/, '').trim() : KIND_LABEL[f.kind];
+    return `<button type="button" data-path="${esc(f.path)}" title="${esc(f.name)}">${esc(label)}</button>`;
+  }).join('');
 
   ensureViewer();
   setMeasure(false);
